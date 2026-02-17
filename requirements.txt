@@ -1,1 +1,2 @@
-spotipyrequests
+spotipy
+requests
