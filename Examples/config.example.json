@@ -1,0 +1,28 @@
+{
+  "credentials": {
+    "client_id": "YOUR_CLIENT_ID_HERE",
+    "client_secret": "YOUR_CLIENT_SECRET_HERE",
+    "redirect_uri": "http://localhost:8888/callback"
+  },
+  "workflow": [
+    { 
+      "comment": "This is a minimal example workflow.",
+      "action": "source", 
+      "id": "37i9dQZF1DXcBWIGoYBM5M", 
+      "name": "Today's Top Hits", 
+      "output": "src_hits" 
+    },
+    { 
+      "action": "sample", 
+      "input": "src_hits", 
+      "amount": 20, 
+      "output": "my_selection" 
+    },
+    { 
+      "action": "save", 
+      "input": "my_selection", 
+      "id": "YOUR_TARGET_PLAYLIST_ID_HERE", 
+      "shuffle": true 
+    }
+  ]
+}

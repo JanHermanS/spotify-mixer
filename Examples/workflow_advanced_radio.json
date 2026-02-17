@@ -1,0 +1,61 @@
+{
+  "credentials": {
+    "client_id": "YOUR_CLIENT_ID_HERE",
+    "client_secret": "YOUR_CLIENT_SECRET_HERE",
+    "redirect_uri": "http://localhost:8888/callback"
+  },
+  "workflow": [
+    { "comment": "--- PHASE 1: LOAD LOCAL DATABASES ---" },
+    { "action": "source_file", "filename": "db_blocked_tracks.json", "hydrate": false, "output": "db_tracks" },
+    { "action": "source_file", "filename": "db_blocked_artists.json", "hydrate": false, "output": "db_artists" },
+
+    { "comment": "--- PHASE 2: BASE CONTENT ---" },
+    { "action": "source", "id": "37i9dQZF1DXcBWIGoYBM5M", "name": "Today's Top Hits", "output": "src_hits" },
+    { "action": "source", "id": "37i9dQZF1DX4o1oenSJRJd", "name": "All Out 00s", "output": "src_00s" },
+    { "action": "source", "id": "37i9dQZF1DXbTxeAdrVG2l", "name": "All Out 90s", "output": "src_90s" },
+    
+    { "action": "mix", "inputs": ["src_hits", "src_00s", "src_90s"], "output": "pool_main" },
+    { "action": "sample", "input": "pool_main", "amount": 200, "output": "pool_sampled" },
+
+    { "comment": "--- PHASE 3: SEASONAL INJECTION ---" },
+    { 
+      "action": "season", 
+      "output": "pool_seasonal",
+      "sample": 50,
+      "cases": [
+        { "name": "Christmas", "months": [12], "sources": ["37i9dQZF1DX0Yxoavh5qJV"] },
+        { "name": "Summer Vibes", "months": [6, 7, 8], "sources": ["37i9dQZF1DX1bzILRveYHb"] }
+      ]
+    },
+
+    { "comment": "--- PHASE 4: DISCOVERY INJECTION ---" },
+    { "action": "source", "id": "37i9dQZF1DX2apWzyECwyZ", "name": "New Music Friday", "output": "src_new" },
+    { "action": "sample", "input": "src_new", "amount": 30, "output": "src_new_sampled" },
+
+    { "comment": "--- PHASE 5: MERGE ALL ---" },
+    { "action": "mix", "inputs": ["pool_sampled", "pool_seasonal"], "output": "mix_base" },
+
+    { 
+      "comment": "Inject new music every ~10 tracks to keep it fresh.",
+      "action": "inject",
+      "input": "mix_base",
+      "inject_input": "src_new_sampled",
+      "every": 10,
+      "variance": 2,
+      "output": "mix_injected" 
+    },
+
+    { "comment": "--- PHASE 6: FILTER & CLEANUP ---" },
+    { "comment": "Apply the local blocklists loaded in Phase 1." },
+    { "action": "filter_exclude", "input": "mix_injected", "exclude_input": "db_tracks", "output": "mix_clean_1" },
+    { "action": "filter_artist", "input": "mix_clean_1", "blacklist_input": "db_artists", "output": "mix_clean_2" },
+    
+    { "action": "dedup", "input": "mix_clean_2", "output": "mix_dedup" },
+
+    { "comment": "--- PHASE 7: FINAL POLISH ---" },
+    { "action": "weighted_shuffle", "input": "mix_dedup", "by": "popularity", "factor": 20, "output": "mix_shuffled" },
+    { "action": "artist_separation", "input": "mix_shuffled", "min_distance": 10, "output": "mix_final" },
+
+    { "action": "save", "input": "mix_final", "id": "YOUR_RADIO_PLAYLIST_ID", "shuffle": false }
+  ]
+}

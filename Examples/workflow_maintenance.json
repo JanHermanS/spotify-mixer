@@ -1,0 +1,44 @@
+{
+  "credentials": {
+    "client_id": "YOUR_CLIENT_ID_HERE",
+    "client_secret": "YOUR_CLIENT_SECRET_HERE",
+    "redirect_uri": "http://localhost:8888/callback"
+  },
+  "workflow": [
+    { "comment": "--- MAINTENANCE MODE ---" },
+    { "comment": "Use this workflow to sync Spotify 'inbox' playlists to local JSON databases." },
+
+    { 
+      "comment": "1. Update Track Blacklist: Reads 'Dislike' playlist, adds to DB, clears playlist.",
+      "action": "sync_local_db",
+      "id": "YOUR_DISLIKE_PLAYLIST_ID",
+      "filename": "db_blocked_tracks.json",
+      "mode": "append",
+      "store_type": "tracks",
+      "clear_source": true,
+      "output": "log_tracks"
+    },
+
+    { 
+      "comment": "2. Update Artist Blacklist: Extract artists from tracks and block them globally.",
+      "action": "sync_local_db",
+      "id": "YOUR_BAD_ARTISTS_PLAYLIST_ID",
+      "filename": "db_blocked_artists.json",
+      "mode": "append",
+      "store_type": "artists",
+      "clear_source": true,
+      "output": "log_artists"
+    },
+
+    { 
+      "comment": "3. Whitelist: Optionally remove tracks from the blacklist DB if you changed your mind.",
+      "action": "sync_local_db",
+      "id": "YOUR_WHITELIST_PLAYLIST_ID",
+      "filename": "db_blocked_tracks.json",
+      "mode": "remove",
+      "store_type": "tracks",
+      "clear_source": true,
+      "output": "log_whitelist"
+    }
+  ]
+}

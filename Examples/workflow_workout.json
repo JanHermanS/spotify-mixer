@@ -1,0 +1,37 @@
+{
+  "credentials": {
+    "client_id": "YOUR_CLIENT_ID_HERE",
+    "client_secret": "YOUR_CLIENT_SECRET_HERE",
+    "redirect_uri": "http://localhost:8888/callback"
+  },
+  "workflow": [
+    { "comment": "--- HIGH ENERGY WORKOUT MIX ---" },
+    
+    { "action": "source", "id": "37i9dQZF1DX76Wlfdnj7AP", "name": "Beast Mode", "output": "src_beast" },
+    { "action": "source", "id": "37i9dQZF1DXadOVCgGhS7j", "name": "Rock Workout", "output": "src_rock" },
+    { "action": "source", "id": "37i9dQZF1DX0HRj9P7NxeE", "name": "Workout Twerkout", "output": "src_twerk" },
+
+    { "action": "mix", "inputs": ["src_beast", "src_rock", "src_twerk"], "output": "pool_raw" },
+
+    { 
+      "comment": "Filter for high tempo (140+ BPM) and high energy (>70%).",
+      "comment2": "Note: Audio features might require extended API permissions or fallback.",
+      "action": "filter_audio", 
+      "input": "pool_raw", 
+      "min_bpm": 140, 
+      "min_energy": 0.70,
+      "fallback": "none",
+      "output": "pool_high_energy" 
+    },
+
+    { 
+      "comment": "Ensure a nice spread of artists.",
+      "action": "artist_separation", 
+      "input": "pool_high_energy", 
+      "min_distance": 5, 
+      "output": "final_mix" 
+    },
+
+    { "action": "save", "input": "final_mix", "id": "YOUR_WORKOUT_PLAYLIST_ID", "shuffle": false }
+  ]
+}
