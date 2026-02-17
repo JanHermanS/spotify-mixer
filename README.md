@@ -63,6 +63,29 @@ Create a new file (e.g., `my_radio.json`) based on `config.example.json`. Paste 
 }
 ```
 
+### Basic Workflow Structure
+
+The `workflow` is a list of actions executed from top to bottom. Each action produces an output (in memory) which can be used as input for the next action.
+
+```json
+"workflow": [
+  {
+    "comment": "1. Get tracks from a playlist",
+    "action": "source",
+    "id": "37i9dQZF1DXcBWIGoYBM5M",
+    "hydrate": "auto",
+    "output": "my_source_tracks"
+  },
+  {
+    "comment": "2. Save them to your own playlist",
+    "action": "save",
+    "input": "my_source_tracks",
+    "id": "YOUR_TARGET_PLAYLIST_ID",
+    "shuffle": true
+  }
+]
+```
+
 ---
 
 ## 🛠️ Usage
@@ -86,13 +109,22 @@ The logic is defined in the `workflow` array in your JSON file. The script execu
 
 * **`source`**: Fetches tracks from a Spotify Playlist, Album, or Artist.
   * `id`: The Spotify ID (e.g., `37i9dQZF1DXcBWIGoYBM5M`). Use `"me"` for your "Liked Songs".
-  * `hydrate`: `"auto"` (default), `true`, or `false`. Set to `false` for speed if you don't need artist/genre data immediately.
+  * `hydrate`: Controls metadata fetching.
+    * `"true"`: Fetches full metadata (Artist, Album, Images). **Slower**, but required if you plan to use `artist_separation` or `filter_artist`.
+    * `"false"`: Only fetches track IDs. **Very fast**. Use this for large lists that you only want to mix or exclude.
+    * `"auto"` (Default): Uses `"false"` for API calls (since API returns full data) but switches to `"true"` if the scraper is used (since scraping only retrieves IDs and lacks metadata).
 * **`source_file`**: Loads tracks from a local file.
   * `filename`: Path to `.json` (database) or `.txt` file.
-* **`sync_local_db`**: **(Powerful)** Syncs a Spotify playlist to a local JSON database and optionally clears the playlist. Great for maintaining "Inbox" style blacklists.
-  * `mode`: `"append"` (add new) or `"remove"` (whitelist logic).
+* **`sync_local_db`**: **(Powerful)** Syncs a Spotify playlist to a local JSON database.
+  * **The "Inbox" Workflow**:
+    1. Create a playlist in Spotify (e.g., "Blacklist Inbox").
+    2. Whenever you hear a bad song, add it to that playlist.
+    3. Run this script with `clear_source: true`.
+    4. The script saves the song to `db_blacklist.json` and **empties** the Spotify playlist.
+    5. Result: A permanent local database that grows over time, while your Spotify playlist remains clean.
+  * `mode`: `"append"` (add new items) or `"remove"` (remove items found in playlist from DB).
   * `store_type`: `"tracks"` (block specific songs) or `"artists"` (block the artist globally).
-  * `clear_source`: `true` to wipe the Spotify playlist after syncing.
+  * `clear_source`: `true` (Recommended) to wipe the Spotify playlist after syncing.
 
 ### Manipulation & Mixing
 
