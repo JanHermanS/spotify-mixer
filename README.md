@@ -80,7 +80,8 @@ The `workflow` is a list of actions executed from top to bottom. Each action pro
     "comment": "2. Save them to your own playlist",
     "action": "save",
     "input": "my_source_tracks",
-    "id": "YOUR_TARGET_PLAYLIST_ID",
+    "create_new": true,
+    "name": "My Daily Mix",
     "shuffle": true
   }
 ]
@@ -108,7 +109,9 @@ The logic is defined in the `workflow` array in your JSON file. The script execu
 ### Input & Sources
 
 * **`source`**: Fetches tracks from a Spotify Playlist, Album, or Artist.
-  * `id`: The Spotify ID (e.g., `37i9dQZF1DXcBWIGoYBM5M`). Use `"me"` for your "Liked Songs".
+  * `id`: The Spotify ID (e.g., `37i9dQZF1DXcBWIGoYBM5M`).
+    * Use `"me"` for your "Liked Songs".
+    * **New:** Use `"top_tracks_short"`, `"top_tracks_medium"`, or `"top_tracks_long"` to fetch your personal top tracks (4 weeks, 6 months, or all time).
   * `hydrate`: Controls metadata fetching.
     * `"true"`: Fetches full metadata (Artist, Album, Images). **Slower**, but required if you plan to use `artist_separation` or `filter_artist`.
     * `"false"`: Only fetches track IDs. **Very fast**. Use this for large lists that you only want to mix or exclude.
@@ -116,12 +119,12 @@ The logic is defined in the `workflow` array in your JSON file. The script execu
 * **`source_file`**: Loads tracks from a local file.
   * `filename`: Path to `.json` (database) or `.txt` file.
 * **`sync_local_db`**: **(Powerful)** Syncs a Spotify playlist to a local JSON database.
-  * **The "Inbox" Workflow**:
+  * **The "Inbox" Workflow (How it works in practice):**
     1. Create a playlist in Spotify (e.g., "Blacklist Inbox").
-    2. Whenever you hear a bad song, add it to that playlist.
-    3. Run this script with `clear_source: true`.
-    4. The script saves the song to `db_blacklist.json` and **empties** the Spotify playlist.
-    5. Result: A permanent local database that grows over time, while your Spotify playlist remains clean.
+    2. Whenever you hear a song you hate, add it to that playlist.
+    3. Configure this script with `clear_source: true`.
+    4. When the script runs, it saves the song to `db_blacklist.json` and **empties** the Spotify playlist.
+    5. **Result:** You have a permanent, growing local database of blocked songs, while your Spotify playlist stays clean and ready for new additions.
   * `mode`: `"append"` (add new items) or `"remove"` (remove items found in playlist from DB).
   * `store_type`: `"tracks"` (block specific songs) or `"artists"` (block the artist globally).
   * `clear_source`: `true` (Recommended) to wipe the Spotify playlist after syncing.
@@ -165,7 +168,10 @@ The logic is defined in the `workflow` array in your JSON file. The script execu
 * **`artist_separation`**: Reorders the list to ensure the same artist doesn't play within *N* tracks.
   * `min_distance`: e.g., `10`.
 * **`save`**: Pushes the result to a Spotify Playlist.
-  * `id`: Target Playlist ID.
+  * `id`: Target Playlist ID (Optional if `create_new` is true).
+  * `create_new`: `true` to automatically create a brand new playlist on your account (useful to solve permission errors).
+  * `name`: Name for the new playlist (used with `create_new`).
+  * `description`: Description for the new playlist.
   * **Note:** This performs a "Wipe & Write" (clears the playlist first) to ensure exact syncing.
 
 ---
