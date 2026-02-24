@@ -41,7 +41,7 @@ class SpotifyMixer:
             client_id=creds['client_id'],
             client_secret=creds['client_secret'],
             redirect_uri=creds['redirect_uri'],
-            scope="playlist-modify-public playlist-modify-private playlist-read-private user-library-read",
+            scope="playlist-modify-public playlist-modify-private playlist-read-private user-library-read user-top-read",
             cache_path=cache_path,
             open_browser=False
         )
@@ -276,8 +276,11 @@ class SpotifyMixer:
             with open(db_path, 'w', encoding='utf-8') as f: json.dump(current_db, f, indent=2)
         
         if clear_source and spotify_items:
-            try: self.sp_user.playlist_replace_items(playlist_id, [])
-            except: print("    ! Could not clear playlist.")
+            try: 
+                # Bypass Spotipy's deprecated /tracks endpoint
+                self.sp_user._put(f"playlists/{playlist_id}/items", payload={"uris": []})
+            except Exception as e:
+                print(f"    ! Could not clear playlist. API Error: {e}")
         return db_list
 
     def get_audio_features_reccobeats(self, track_ids):
@@ -346,8 +349,16 @@ class SpotifyMixer:
 
             elif action == 'sample':
                 inp = self.resolve_input(step['input'])
-                result = random.sample(inp, step['amount']) if len(inp) > step['amount'] else inp
-                print(f"  - Sampled {len(result)}.")
+                if inp:
+                    req = step['amount']
+                    if len(inp) > req:
+                        result = random.sample(inp, req)
+                        print(f"  - Sampled {req} tracks.")
+                    else:
+                        result = inp
+                        print(f"  - Sample requested ({req}) > available ({len(inp)}). Taking all.")
+                else:
+                    print("  - Empty input for sample.")
 
             elif action == 'mix':
                 for name in step['inputs']: result.extend(self.memory.get(name, []))
@@ -426,7 +437,7 @@ class SpotifyMixer:
                             result.extend(self.get_tracks(src, hydrate='auto'))
                         break
                 
-                # FIX: Safe sampling if result < required sample
+                # FIX: Safe sampling logic for season output
                 if result and step.get('sample'):
                     req = step['sample']
                     if len(result) > req:
@@ -462,6 +473,7 @@ class SpotifyMixer:
                     name = step.get('name', f"Mixer Output {datetime.now().strftime('%Y-%m-%d')}")
                     desc = step.get('description', "Created by Spotify Mixer")
                     user_id = self.sp_user.current_user()['id']
+                    
                     print(f"  - Creating NEW playlist '{name}'...")
                     new_pl = self.sp_user.user_playlist_create(user=user_id, name=name, public=False, description=desc)
                     target_id = new_pl['id']
@@ -473,12 +485,16 @@ class SpotifyMixer:
                 try:
                     print(f"  - Saving to {target_id}...")
                     if uris:
-                        self.sp_user.playlist_replace_items(target_id, [])
+                        # Bypass Spotipy's deprecated /tracks endpoints for new API compliance
+                        self.sp_user._put(f"playlists/{target_id}/items", payload={"uris": []})
                         time.sleep(0.5) 
-                        for i in range(0, len(uris), 100): self.sp_user.playlist_add_items(target_id, uris[i:i+100])
+                        for i in range(0, len(uris), 100): 
+                            self.sp_user._post(f"playlists/{target_id}/items", payload={"uris": uris[i:i+100]})
                         print(f"  > SAVED: {len(uris)} tracks.")
                     else: print("  ! Empty list.")
-                except Exception as e: print(f"  ! SAVE ERROR: {e}")
+                except Exception as e: 
+                    print(f"  ! SAVE ERROR: {e}")
+                    print(f"    (Make sure your App scopes are updated and user is whitelisted in Spotify Dashboard)")
                 result = inp
 
             self.memory[output_name] = result
