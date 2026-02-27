@@ -8,8 +8,10 @@ Unlike simple "shufflers", this tool functions like a radio station programmer: 
 
 ## ⚠️ Important Disclaimers
 
-1. **Experimental Scraper**: This tool includes a fallback mechanism that scrapes the Spotify Embed HTML when the official API fails (e.g., for certain "Spotify Owned" playlists that return 404 via API). **This feature is experimental** and meant for educational purposes.
-2. **Spotify API 2026**: As of Feb 2026, Spotify has restricted access to "Audio Features" (BPM, Energy) for many developers.
+1. **Spotify Premium Required**: As of recent API changes (Feb 2026), an active **Spotify Premium subscription is mandatory** to use the Spotify Developer API. If your Premium subscription expires, the script will stop working and throw API errors.
+2. **App User Limits**: Spotify now restricts Developer Apps to a maximum of 5 registered users. This tool is intended for personal use, so this shouldn't be an issue, but you must explicitly whitelist your own account in the Spotify Developer Dashboard (see Setup).
+3. **Experimental Scraper**: This tool includes a fallback mechanism that scrapes the Spotify Embed HTML when the official API fails (e.g., for certain "Spotify Owned" playlists that return 404 via API). **This feature is experimental** and meant for educational purposes.
+4. **Spotify API 2026 Audio Features**: Spotify has heavily restricted access to "Audio Features" (BPM, Energy).
     * This script attempts to use **ReccoBeats** as a primary source for audio data.
     * It includes a fallback to the official API.
     * If both fail (Error 403), the script will automatically **skip** audio filters and continue generating the playlist without crashing.
@@ -40,12 +42,14 @@ To use this tool, you need to create a simple "App" in the Spotify Developer Das
 2. Log in with your Spotify account.
 3. Click **"Create App"**.
 4. Fill in a name (e.g., "My Playlist Mixer") and description.
-5. **Crucial Step:** In the **Redirect URIs** field, enter:
+5. **Crucial Step (Redirect URI):** In the **Redirect URIs** field, enter:
    ```text
    http://localhost:8888/callback
    ```
    *(Don't forget to click "Add" and "Save" at the bottom)*.
-6. Once created, go to the **Settings** of your app.
+6. **Crucial Step (API & User Whitelist):** Go to the **Settings** of your new app.
+   * Under the **APIs used** tab (or Basic Information), explicitly add/check **Web API**.
+   * Under the **User Management** tab, add the exact email address associated with your Spotify Premium account to whitelist yourself.
 7. Copy the **Client ID** and **Client Secret**.
 
 ### Configuration

@@ -475,7 +475,8 @@ class SpotifyMixer:
                     user_id = self.sp_user.current_user()['id']
                     
                     print(f"  - Creating NEW playlist '{name}'...")
-                    new_pl = self.sp_user.user_playlist_create(user=user_id, name=name, public=False, description=desc)
+                    # Bypass Spotipy's deprecated /users/{user}/playlists endpoint
+                    new_pl = self.sp_user._post("me/playlists", payload={"name": name, "public": False, "description": desc})
                     target_id = new_pl['id']
                     print(f"    > Created! ID: {target_id}")
                 # ----------------------------
