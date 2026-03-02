@@ -174,7 +174,7 @@ class SpotifyMixer:
     def get_tracks_simple(self, playlist_id, hydrate='auto'):
         tracks = []
         try:
-            results = self.sp_user.playlist_items(playlist_id, market="from_token")
+            results = self.sp_user._get(f"playlists/{playlist_id}/items", market="from_token")
             while results:
                 for item in results['items']:
                     if item.get('track') and item['track'].get('uri'): tracks.append(item['track'])
@@ -207,15 +207,15 @@ class SpotifyMixer:
                 return tracks
             
             try:
-                results = self.sp_user.playlist_items(playlist_id, market="from_token")
+                results = self.sp_user._get(f"playlists/{playlist_id}/items", market="from_token")
                 fetch_client = self.sp_user
             except:
                 if str(playlist_id).startswith("37i"): return self.scrape_playlist_tracks(playlist_id, hydrate=hydrate)
                 try:
-                    results = self.sp_public.playlist_items(playlist_id, market="NL")
+                    results = self.sp_public._get(f"playlists/{playlist_id}/items", market="NL")
                     fetch_client = self.sp_public
                 except: return self.scrape_playlist_tracks(playlist_id, hydrate=hydrate)
-
+                
             if results:
                 while results:
                     for item in results['items']:
@@ -386,11 +386,18 @@ class SpotifyMixer:
                 print(f"  - Exclude: {len(result)} left.")
 
             elif action == 'filter_artist':
-                blacklist = self.resolve_input(step['blacklist_input'])
-                bad_ids = {a['id'] for item in blacklist for a in item.get('artists', [])} | {item['id'] for item in blacklist if 'id' in item and len(item.get('artists', []))==1}
-                result = [t for t in self.resolve_input(step['input']) if not (set(a['id'] for a in t.get('artists', [])) & bad_ids)]
-                print(f"  - Artist Filter: {len(result)} left.")
-
+                # Gebruik filter_input als die er is, anders blacklist_input voor backwards compatibility
+                input_key = step.get('filter_input', step.get('blacklist_input'))
+                filter_list = self.resolve_input(input_key)
+                
+                target_ids = {a['id'] for item in filter_list for a in item.get('artists', [])} | {item['id'] for item in filter_list if 'id' in item and len(item.get('artists', []))==1}
+                
+                if step.get('mode', 'exclude') == 'include':
+                    result = [t for t in self.resolve_input(step['input']) if (set(a['id'] for a in t.get('artists', [])) & target_ids)]
+                else:
+                    result = [t for t in self.resolve_input(step['input']) if not (set(a['id'] for a in t.get('artists', [])) & target_ids)]
+                print(f"  - Artist Filter ({step.get('mode', 'exclude')}): {len(result)} left.")
+                
             elif action == 'filter_genre':
                 inp = self.resolve_input(step['input']); target = [g.lower() for g in step['genres']]
                 # Quick batch fetch artist genres

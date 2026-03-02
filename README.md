@@ -153,8 +153,9 @@ The logic is defined in the `workflow` array in your JSON file. The script execu
 * **`filter_genre`**: Keeps or removes tracks based on artist genres.
   * `genres`: List of keywords (e.g., `["rock", "metal"]`).
   * `mode`: `"include"` or `"exclude"`.
-* **`filter_artist`**: Removes tracks if the artist appears in a blacklist.
-  * `blacklist_input`: The input containing blocked tracks or artists (usually loaded via `source_file` from a database).
+* **`filter_artist`**: Keeps or removes tracks based on a list of artists.
+  * `filter_input` (or `blacklist_input`): The input containing tracks or artists to check against (usually loaded via `source_file` from a database).
+  * `mode`: `"include"` or `"exclude"` (default is `"exclude"`).
 * **`filter_exclude`**: Removes specific tracks (by ID) found in another list.
   * `exclude_input`: The input containing tracks to remove.
 * **`filter_audio`**: Filters by BPM or Energy.
