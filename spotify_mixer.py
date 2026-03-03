@@ -37,7 +37,6 @@ class SpotifyMixer:
         if not os.access(self.script_dir, os.W_OK):
             print(f"  ! WARNING: No write permissions in {self.script_dir}")
 
-        # Added playlist-read-collaborative to fix 403s on reading own collaborative playlists
         auth_manager = SpotifyOAuth(
             client_id=creds['client_id'],
             client_secret=creds['client_secret'],
@@ -174,15 +173,17 @@ class SpotifyMixer:
 
     def get_tracks_simple(self, playlist_id, hydrate='auto'):
         tracks = []
+        # Strip IDs safely
         if str(playlist_id).startswith('spotify:playlist:'): playlist_id = str(playlist_id).split(':')[-1]
         elif "spotify.com" in str(playlist_id): playlist_id = str(playlist_id).split("/")[-1].split("?")[0]
         
         try:
-            results = self.sp_user.playlist_items(playlist_id, market="from_token")
+            # BYPASS: Directly hit the new /items endpoint
+            results = self.sp_user._get(f"playlists/{playlist_id}/items", market="from_token")
             while results:
                 for item in results['items']:
                     if item.get('track') and item['track'].get('uri'): tracks.append(item['track'])
-                if results['next']: results = self.sp_user.next(results)
+                if results.get('next'): results = self.sp_user.next(results)
                 else: break
             if self._should_hydrate(hydrate, is_scraper=False) and tracks:
                  uris = [t['uri'] for t in tracks]
@@ -191,6 +192,7 @@ class SpotifyMixer:
         except: return self.scrape_playlist_tracks(playlist_id, hydrate=hydrate)
 
     def get_tracks(self, playlist_id, playlist_name=None, hydrate='auto'):
+        # Strip IDs safely
         if str(playlist_id).startswith('spotify:playlist:'): playlist_id = str(playlist_id).split(':')[-1]
         elif "spotify.com" in str(playlist_id): playlist_id = str(playlist_id).split("/")[-1].split("?")[0]
         
@@ -213,14 +215,15 @@ class SpotifyMixer:
                 return tracks
             
             try:
-                results = self.sp_user.playlist_items(playlist_id, market="from_token")
+                # BYPASS: Directly hit the new /items endpoint for reading
+                results = self.sp_user._get(f"playlists/{playlist_id}/items", market="from_token")
                 fetch_client = self.sp_user
             except Exception as e:
                 if "403" in str(e):
-                    print(f"    ! 403 Forbidden on GET. Check if playlist is collaborative or owned by another account.")
+                    print(f"    ! 403 Forbidden on GET API. Falling back to Scraper...")
                 if str(playlist_id).startswith("37i"): return self.scrape_playlist_tracks(playlist_id, hydrate=hydrate)
                 try:
-                    results = self.sp_public.playlist_items(playlist_id, market="NL")
+                    results = self.sp_public._get(f"playlists/{playlist_id}/items", market="NL")
                     fetch_client = self.sp_public
                 except: return self.scrape_playlist_tracks(playlist_id, hydrate=hydrate)
 
@@ -228,7 +231,7 @@ class SpotifyMixer:
                 while results:
                     for item in results['items']:
                         if item.get('track') and item['track'].get('id'): tracks.append(item['track'])
-                    if results['next']: results = fetch_client.next(results)
+                    if results.get('next'): results = fetch_client.next(results)
                     else: break
         except Exception:
             return self.search_playlist_fallback(playlist_id, playlist_name, hydrate=hydrate)
@@ -450,7 +453,6 @@ class SpotifyMixer:
                             result.extend(self.get_tracks(src, hydrate='auto'))
                         break
                 
-                # FIX: Safe sampling logic for season output
                 if result and step.get('sample'):
                     req = step['sample']
                     if len(result) > req:
@@ -488,7 +490,7 @@ class SpotifyMixer:
                     user_id = self.sp_user.current_user()['id']
                     
                     print(f"  - Creating NEW playlist '{name}'...")
-                    new_pl = self.sp_user.user_playlist_create(user=user_id, name=name, public=False, description=desc)
+                    new_pl = self.sp_user._post("me/playlists", payload={"name": name, "public": False, "description": desc})
                     target_id = new_pl['id']
                     print(f"    > Created! ID: {target_id}")
                 # ----------------------------
