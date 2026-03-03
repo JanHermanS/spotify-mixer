@@ -37,11 +37,12 @@ class SpotifyMixer:
         if not os.access(self.script_dir, os.W_OK):
             print(f"  ! WARNING: No write permissions in {self.script_dir}")
 
+        # Added playlist-read-collaborative to fix 403s on reading own collaborative playlists
         auth_manager = SpotifyOAuth(
             client_id=creds['client_id'],
             client_secret=creds['client_secret'],
             redirect_uri=creds['redirect_uri'],
-            scope="playlist-modify-public playlist-modify-private playlist-read-private user-library-read user-top-read",
+            scope="playlist-modify-public playlist-modify-private playlist-read-private playlist-read-collaborative user-library-read user-top-read",
             cache_path=cache_path,
             open_browser=False
         )
@@ -173,8 +174,11 @@ class SpotifyMixer:
 
     def get_tracks_simple(self, playlist_id, hydrate='auto'):
         tracks = []
+        if str(playlist_id).startswith('spotify:playlist:'): playlist_id = str(playlist_id).split(':')[-1]
+        elif "spotify.com" in str(playlist_id): playlist_id = str(playlist_id).split("/")[-1].split("?")[0]
+        
         try:
-            results = self.sp_user._get(f"playlists/{playlist_id}/items", market="from_token")
+            results = self.sp_user.playlist_items(playlist_id, market="from_token")
             while results:
                 for item in results['items']:
                     if item.get('track') and item['track'].get('uri'): tracks.append(item['track'])
@@ -187,7 +191,9 @@ class SpotifyMixer:
         except: return self.scrape_playlist_tracks(playlist_id, hydrate=hydrate)
 
     def get_tracks(self, playlist_id, playlist_name=None, hydrate='auto'):
-        if "spotify.com" in playlist_id: playlist_id = playlist_id.split("/")[-1].split("?")[0]
+        if str(playlist_id).startswith('spotify:playlist:'): playlist_id = str(playlist_id).split(':')[-1]
+        elif "spotify.com" in str(playlist_id): playlist_id = str(playlist_id).split("/")[-1].split("?")[0]
+        
         tracks = []
         should_hydrate = self._should_hydrate(hydrate, is_scraper=False)
 
@@ -207,15 +213,17 @@ class SpotifyMixer:
                 return tracks
             
             try:
-                results = self.sp_user._get(f"playlists/{playlist_id}/items", market="from_token")
+                results = self.sp_user.playlist_items(playlist_id, market="from_token")
                 fetch_client = self.sp_user
-            except:
+            except Exception as e:
+                if "403" in str(e):
+                    print(f"    ! 403 Forbidden on GET. Check if playlist is collaborative or owned by another account.")
                 if str(playlist_id).startswith("37i"): return self.scrape_playlist_tracks(playlist_id, hydrate=hydrate)
                 try:
-                    results = self.sp_public._get(f"playlists/{playlist_id}/items", market="NL")
+                    results = self.sp_public.playlist_items(playlist_id, market="NL")
                     fetch_client = self.sp_public
                 except: return self.scrape_playlist_tracks(playlist_id, hydrate=hydrate)
-                
+
             if results:
                 while results:
                     for item in results['items']:
@@ -386,10 +394,8 @@ class SpotifyMixer:
                 print(f"  - Exclude: {len(result)} left.")
 
             elif action == 'filter_artist':
-                # Gebruik filter_input als die er is, anders blacklist_input voor backwards compatibility
                 input_key = step.get('filter_input', step.get('blacklist_input'))
                 filter_list = self.resolve_input(input_key)
-                
                 target_ids = {a['id'] for item in filter_list for a in item.get('artists', [])} | {item['id'] for item in filter_list if 'id' in item and len(item.get('artists', []))==1}
                 
                 if step.get('mode', 'exclude') == 'include':
@@ -397,7 +403,7 @@ class SpotifyMixer:
                 else:
                     result = [t for t in self.resolve_input(step['input']) if not (set(a['id'] for a in t.get('artists', [])) & target_ids)]
                 print(f"  - Artist Filter ({step.get('mode', 'exclude')}): {len(result)} left.")
-                
+
             elif action == 'filter_genre':
                 inp = self.resolve_input(step['input']); target = [g.lower() for g in step['genres']]
                 # Quick batch fetch artist genres
@@ -482,8 +488,7 @@ class SpotifyMixer:
                     user_id = self.sp_user.current_user()['id']
                     
                     print(f"  - Creating NEW playlist '{name}'...")
-                    # Bypass Spotipy's deprecated /users/{user}/playlists endpoint
-                    new_pl = self.sp_user._post("me/playlists", payload={"name": name, "public": False, "description": desc})
+                    new_pl = self.sp_user.user_playlist_create(user=user_id, name=name, public=False, description=desc)
                     target_id = new_pl['id']
                     print(f"    > Created! ID: {target_id}")
                 # ----------------------------
