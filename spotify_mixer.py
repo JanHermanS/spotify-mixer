@@ -35,7 +35,7 @@ class SpotifyMixer:
         cache_path = os.path.join(self.script_dir, ".cache")
         
         if not os.access(self.script_dir, os.W_OK):
-            print(f"  ! WARNING: No write permissions in {self.script_dir}")
+            print(f"  ! WARNING: No write permissions in {self.script_dir}. Credentials might not be cached.")
 
         auth_manager = SpotifyOAuth(
             client_id=creds['client_id'],
@@ -92,7 +92,7 @@ class SpotifyMixer:
             except Exception as e:
                 print(f"      ! Metadata fetch error: {str(e)[:100]}")
             
-        print(f"      -> Metadata fetched for {len(temp_tracks)} tracks. Refreshing via search...")
+        print(f"      -> Metadata fetched for {len(temp_tracks)} tracks. Refining via search...")
         valid_tracks = []
         for idx, t in enumerate(temp_tracks):
             query = f"track:{t['name']} artist:{t['artists'][0]['name']}"
@@ -117,28 +117,27 @@ class SpotifyMixer:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                         tracks = data.get('tracks', [])
-                        print(f"    > Database '{filename}': {len(tracks)} items loaded.")
+                        print(f"    > Local Database '{filename}': Loaded {len(tracks)} items.")
                         return tracks
                 else:
-                    print(f"    ! Database '{filename}' does not exist yet.")
                     return []
 
             with open(file_path, 'r', encoding='utf-8') as f:
                 uris = [line.strip() for line in f if line.strip().startswith('spotify:track:')]
             
-            print(f"    > File '{filename}': {len(uris)} URIs found.")
+            print(f"    > Text file '{filename}': Found {len(uris)} URIs.")
             uris = list(set(uris))
             
             if self._should_hydrate(hydrate, is_scraper=False):
                 tracks = self.hydrate_tracks_smart(uris)
             else:
                 tracks = [{'uri': u, 'id': u.split(':')[-1]} for u in uris]
-        except Exception as e: print(f"    ! Error reading file: {e}")
+        except Exception as e: print(f"    ! File read error: {e}")
         return tracks
 
     def scrape_playlist_tracks(self, playlist_id, hydrate='auto'):
         url = f"https://open.spotify.com/embed/playlist/{playlist_id}"
-        print(f"    > Scraper: Deep-scan on Embed page ({url})...")
+        print(f"    > Scraper Fallback: Deep-scan on Embed page ({url})...")
         try:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'}
             response = requests.get(url, headers=headers, timeout=15)
@@ -147,115 +146,106 @@ class SpotifyMixer:
                 ids = re.findall(r'spotify:track:([a-zA-Z0-9]{22})', html)
                 ids = list(dict.fromkeys(ids))
                 if ids:
-                    print(f"      -> FOUND! {len(ids)} track IDs.")
+                    print(f"      -> FOUND! {len(ids)} track IDs via Scraper.")
                     uris = [f"spotify:track:{tid}" for tid in ids]
                     if self._should_hydrate(hydrate, is_scraper=True):
                         return self.hydrate_tracks_smart(uris)
                     else:
                         return [{'uri': u, 'id': u.split(':')[-1]} for u in uris]
-            else: print(f"      ! Could not load page (Status: {response.status_code})")
+            else: print(f"      ! Scraper could not load page (Status: {response.status_code})")
         except Exception as e: print(f"      ! Scraper error: {e}")
         return []
 
-    def search_playlist_fallback(self, playlist_id, playlist_name=None, hydrate='auto'):
-        if not playlist_name: return []
-        is_spotify_owned = str(playlist_id).startswith("37i")
-        final_query = f'"{playlist_name}" owner:spotify' if is_spotify_owned else playlist_name
-        print(f"    > Fallback: Searching for '{playlist_name}'...")
-        try:
-            results = self.sp_user.search(q=final_query, type='playlist', limit=5)
-            if results and 'playlists' in results and results['playlists']['items']:
-                for item in results['playlists']['items']:
-                    if not item: continue
-                    return self.get_tracks_simple(item['id'], hydrate=hydrate)
-        except Exception as e: print(f"    ! Search error: {e}")
-        return []
-
-    def get_tracks_simple(self, playlist_id, hydrate='auto'):
-        tracks = []
-        # Strip IDs safely
-        if str(playlist_id).startswith('spotify:playlist:'): playlist_id = str(playlist_id).split(':')[-1]
-        elif "spotify.com" in str(playlist_id): playlist_id = str(playlist_id).split("/")[-1].split("?")[0]
-        
-        try:
-            # BYPASS: Directly hit the new /items endpoint
-            results = self.sp_user._get(f"playlists/{playlist_id}/items", market="from_token")
-            while results:
-                for item in results['items']:
-                    if item.get('track') and item['track'].get('uri'): tracks.append(item['track'])
-                if results.get('next'): results = self.sp_user.next(results)
-                else: break
-            if self._should_hydrate(hydrate, is_scraper=False) and tracks:
-                 uris = [t['uri'] for t in tracks]
-                 return self.hydrate_tracks_smart(uris)
-            return tracks
-        except: return self.scrape_playlist_tracks(playlist_id, hydrate=hydrate)
-
     def get_tracks(self, playlist_id, playlist_name=None, hydrate='auto'):
-        # Strip IDs safely
-        if str(playlist_id).startswith('spotify:playlist:'): playlist_id = str(playlist_id).split(':')[-1]
-        elif "spotify.com" in str(playlist_id): playlist_id = str(playlist_id).split("/")[-1].split("?")[0]
+        # 1. Check if ID is an existing local file
+        file_path = playlist_id if os.path.isabs(playlist_id) else os.path.join(self.script_dir, playlist_id)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return self.get_tracks_from_file(playlist_id, hydrate=hydrate)
+
+        # 2. Clean IDs and URLs
+        raw_id = str(playlist_id).strip()
+        if raw_id.startswith('spotify:playlist:'): raw_id = raw_id.split(':')[-1]
+        elif "spotify.com" in raw_id: raw_id = raw_id.split("/")[-1].split("?")[0]
         
         tracks = []
         should_hydrate = self._should_hydrate(hydrate, is_scraper=False)
 
         try:
-            # --- TOP TRACKS SUPPORT ---
-            if str(playlist_id).startswith("top_tracks"):
+            if raw_id.startswith("top_tracks"):
                 time_range = 'medium_term'
-                if 'short' in str(playlist_id): time_range = 'short_term'
-                elif 'long' in str(playlist_id): time_range = 'long_term'
+                if 'short' in raw_id: time_range = 'short_term'
+                elif 'long' in raw_id: time_range = 'long_term'
                 print(f"    > Fetching Top Tracks ({time_range})...")
                 results = self.sp_user.current_user_top_tracks(limit=50, time_range=time_range)
                 return results['items']
 
-            if playlist_id == 'me':
+            if raw_id == 'me':
                 results = self.sp_user.current_user_saved_tracks(limit=50, market="from_token")
-                for item in results['items']: tracks.append(item['track'])
+                while results:
+                    for item in results['items']: tracks.append(item['track'])
+                    if results['next']: results = self.sp_user.next(results)
+                    else: break
                 return tracks
             
-            try:
-                # BYPASS: Directly hit the new /items endpoint for reading
-                results = self.sp_user._get(f"playlists/{playlist_id}/items", market="from_token")
-                fetch_client = self.sp_user
-            except Exception as e:
-                if "403" in str(e):
-                    print(f"    ! 403 Forbidden on GET API. Falling back to Scraper...")
-                if str(playlist_id).startswith("37i"): return self.scrape_playlist_tracks(playlist_id, hydrate=hydrate)
+            # --- API FETCH (Strict adherence to Official /items Documentation) ---
+            if len(raw_id) == 22:
+                print(f"    > Fetching items via API (playlists/{raw_id}/items)...")
                 try:
-                    results = self.sp_public._get(f"playlists/{playlist_id}/items", market="NL")
-                    fetch_client = self.sp_public
-                except: return self.scrape_playlist_tracks(playlist_id, hydrate=hydrate)
+                    # Direct bypass using the official /items endpoint
+                    url = f"playlists/{raw_id}/items"
+                    results = self.sp_user._get(url, market="from_token", limit=100)
+                    
+                    while results:
+                        items = results.get('items', [])
+                        print(f"      -> API returned page with {len(items)} items.")
+                        for item in items:
+                            if item and item.get('track') and item['track'].get('id'):
+                                tracks.append(item['track'])
+                        
+                        next_url = results.get('next')
+                        if next_url:
+                            print(f"      -> Fetching next page...")
+                            # Spotipy's _get handles full HTTPS URLs natively
+                            results = self.sp_user._get(next_url)
+                        else:
+                            break
+                    
+                    if tracks: 
+                        return tracks
+                    else:
+                        print("    ! API connected successfully, but returned 0 tracks. Is the playlist empty?")
+                
+                except Exception as e:
+                    print(f"    ! API fetch failed: {e}")
+                    if "403" in str(e):
+                        print("    ! 403 Forbidden: Missing scopes, user mismatch, or Premium required.")
 
-            if results:
-                while results:
-                    for item in results['items']:
-                        if item.get('track') and item['track'].get('id'): tracks.append(item['track'])
-                    if results.get('next'): results = fetch_client.next(results)
-                    else: break
-        except Exception:
-            return self.search_playlist_fallback(playlist_id, playlist_name, hydrate=hydrate)
+            # --- FALLBACK: SCRAPER ---
+            if len(raw_id) == 22:
+                return self.scrape_playlist_tracks(raw_id, hydrate=hydrate)
 
-        if should_hydrate and tracks:
-            print(f"    > Forced Hydrating {len(tracks)} tracks via Re-Search...")
-            return self.hydrate_tracks_smart([t['uri'] for t in tracks])
-        return tracks
+        except Exception as e: print(f"    ! Unexpected error in get_tracks: {e}")
+        return []
 
     def sync_local_db(self, playlist_id, db_filename, mode='append', store_type='tracks', clear_source=False):
         if not os.path.isabs(db_filename): db_path = os.path.join(self.script_dir, db_filename)
         else: db_path = db_filename
-        print(f"  - Syncing playlist {playlist_id} to DB '{db_filename}'...")
         
-        spotify_items = self.get_tracks(playlist_id, hydrate=True)
-        if not spotify_items: return []
-
+        # Load current database
         current_db = {'tracks': []}
         if os.path.exists(db_path):
             try:
                 with open(db_path, 'r', encoding='utf-8') as f: current_db = json.load(f)
             except: pass
-        
         db_list = current_db.get('tracks', [])
+
+        # Fetch new items from Spotify
+        spotify_items = self.get_tracks(playlist_id, hydrate=True)
+        
+        if not spotify_items:
+            print("    > Source playlist on Spotify is currently empty. No new items to sync.")
+            return db_list # Return existing DB
+
         input_ids = set()
         for t in spotify_items:
             if store_type == 'tracks': input_ids.add(t['id'])
@@ -274,24 +264,24 @@ class SpotifyMixer:
                         if a['id'] not in existing_ids:
                             entry = {'id': a['id'], 'name': a['name'], 'artists': [{'id': a['id']}]}
                             db_list.append(entry); existing_ids.add(a['id']); count += 1
-            print(f"    > {count} items added.")
+            print(f"    > Added {count} new items to local database.")
 
         elif mode == 'remove':
             orig_len = len(db_list)
             db_list = [item for item in db_list if item['id'] not in input_ids]
             count = orig_len - len(db_list)
-            print(f"    > {count} items removed.")
+            print(f"    > Removed {count} items from local database.")
 
-        current_db['tracks'] = db_list
         if count > 0:
+            current_db['tracks'] = db_list
             with open(db_path, 'w', encoding='utf-8') as f: json.dump(current_db, f, indent=2)
         
-        if clear_source and spotify_items:
+        if clear_source and len(spotify_items) > 0:
             try: 
-                # Bypass Spotipy's deprecated /tracks endpoint
                 self.sp_user._put(f"playlists/{playlist_id}/items", payload={"uris": []})
-            except Exception as e:
-                print(f"    ! Could not clear playlist. API Error: {e}")
+                print(f"    > Source playlist on Spotify has been cleared.")
+            except Exception as e: print(f"    ! Could not clear playlist: {e}")
+            
         return db_list
 
     def get_audio_features_reccobeats(self, track_ids):
@@ -310,16 +300,14 @@ class SpotifyMixer:
         for t in tracks:
             if t.get('external_ids', {}).get('isrc'):
                 isrc_map.setdefault(t['external_ids']['isrc'], []).append(t)
-        
         for f in features_list:
             targets = []
             if f.get('isrc') in isrc_map: targets = isrc_map[f['isrc']]
-            elif 'href' in f: # Fallback ID match
+            elif 'href' in f: 
                  try:
                      sid = f['href'].split('track/')[-1].split('?')[0]
                      targets = [t for t in tracks if t['id'] == sid]
                  except: pass
-            
             for t in targets:
                 try:
                     bpm, energy = float(f.get('tempo', 0)), float(f.get('energy', 0))
@@ -343,16 +331,16 @@ class SpotifyMixer:
             result = []
 
             if action == 'source':
-                h = step.get('hydrate', 'auto')
-                result = self.get_tracks(step['id'], step.get('name'), hydrate=h)
-                print(f"  - Fetched: {len(result)} tracks.")
+                result = self.get_tracks(step['id'], step.get('name'), hydrate=step.get('hydrate', 'auto'))
+                print(f"  - Total fetched: {len(result)} tracks.")
 
             elif action == 'source_file':
                 result = self.get_tracks_from_file(step['filename'], hydrate=step.get('hydrate', 'auto'))
-                print(f"  - File: {len(result)} items.")
+                print(f"  - File: Loaded {len(result)} items.")
 
             elif action == 'sync_local_db':
-                result = self.sync_local_db(step['id'], step['filename'], step.get('mode', 'append'), step.get('store_type', 'tracks'), step.get('clear_source', True))
+                result = self.sync_local_db(step['id'], step['filename'], step.get('mode', 'append'), step.get('store_type', 'tracks'), step.get('clear_source', step.get('clear_source', True)))
+                print(f"  - Database: Now contains {len(result)} items (including existing).")
 
             elif action == 'slice':
                 result = self.resolve_input(step['input'])[:step['amount']]
@@ -362,14 +350,9 @@ class SpotifyMixer:
                 inp = self.resolve_input(step['input'])
                 if inp:
                     req = step['amount']
-                    if len(inp) > req:
-                        result = random.sample(inp, req)
-                        print(f"  - Sampled {req} tracks.")
-                    else:
-                        result = inp
-                        print(f"  - Sample requested ({req}) > available ({len(inp)}). Taking all.")
-                else:
-                    print("  - Empty input for sample.")
+                    result = random.sample(inp, min(len(inp), req))
+                    print(f"  - Random sample: {len(result)} tracks.")
+                else: print("  - Input is empty.")
 
             elif action == 'mix':
                 for name in step['inputs']: result.extend(self.memory.get(name, []))
@@ -385,22 +368,21 @@ class SpotifyMixer:
                     final_list.extend(chunk); idx_base += len(chunk)
                     if to_inject and idx_base < len(base): final_list.append(to_inject.pop(0))
                 result = final_list
-                print(f"  - Injected. Total: {len(result)}.")
+                print(f"  - Injection complete. Total: {len(result)}.")
 
             elif action == 'dedup':
                 seen = set(); result = [t for t in self.resolve_input(step['input']) if not (t['uri'] in seen or seen.add(t['uri']))]
-                print(f"  - Dedup: {len(result)} left.")
+                print(f"  - Deduplicated: {len(result)} left.")
 
             elif action == 'filter_exclude':
                 ban_uris = {t['uri'] for t in self.resolve_input(step['exclude_input'])}
                 result = [t for t in self.resolve_input(step['input']) if t['uri'] not in ban_uris]
-                print(f"  - Exclude: {len(result)} left.")
+                print(f"  - Excluded: {len(result)} left.")
 
             elif action == 'filter_artist':
                 input_key = step.get('filter_input', step.get('blacklist_input'))
                 filter_list = self.resolve_input(input_key)
                 target_ids = {a['id'] for item in filter_list for a in item.get('artists', [])} | {item['id'] for item in filter_list if 'id' in item and len(item.get('artists', []))==1}
-                
                 if step.get('mode', 'exclude') == 'include':
                     result = [t for t in self.resolve_input(step['input']) if (set(a['id'] for a in t.get('artists', [])) & target_ids)]
                 else:
@@ -409,28 +391,24 @@ class SpotifyMixer:
 
             elif action == 'filter_genre':
                 inp = self.resolve_input(step['input']); target = [g.lower() for g in step['genres']]
-                # Quick batch fetch artist genres
                 a_ids = list({a['id'] for t in inp for a in t.get('artists', [])}); a_map = {}
                 for i in range(0, len(a_ids), 50):
                     try: 
                         for a in self.sp_user.artists(a_ids[i:i+50])['artists']: a_map[a['id']] = [x.lower() for x in a['genres']]
                     except: pass
-                
                 for t in inp:
                     t_genres = set(g for a in t.get('artists', []) for g in a_map.get(a['id'], []))
                     match = any(tg for tg in t_genres for k in target if k in tg)
-                    if (step.get('mode', 'include') == 'include' and match) or (step.get('mode') == 'exclude' and not match): result.append(t)
+                    if (step.get('mode', 'include', 'exclude') == 'include' and match) or (step.get('mode') == 'exclude' and not match): result.append(t)
                 print(f"  - Genre Filter: {len(result)} left.")
 
             elif action == 'filter_audio':
                 inp = self.resolve_input(step['input'])
                 print(f"  - Audio Analysis on {len(inp)} tracks...")
                 valid = self._apply_audio_features(inp, self.get_audio_features_reccobeats([t['id'] for t in inp]), step.get('min_bpm',0), step.get('max_bpm',999), step.get('min_energy',0), step.get('max_energy',1))
-                
-                # Spotify Fallback
                 remaining = [t for t in inp if not t.get('_audio_found')]
                 if remaining and not self.spotify_features_disabled:
-                    print(f"    > {len(remaining)} tracks via Spotify API...")
+                    print(f"    > {len(remaining)} via Spotify API...")
                     for i in range(0, len(remaining), 100):
                         if self.spotify_features_disabled: break
                         try:
@@ -439,8 +417,9 @@ class SpotifyMixer:
                                 if f and (step.get('min_bpm',0) <= f['tempo'] <= step.get('max_bpm',999)) and (step.get('min_energy',0) <= f['energy'] <= step.get('max_energy',1)):
                                     t = remaining[i+j]; t['bpm'], t['energy'] = f['tempo'], f['energy']; valid.append(t)
                         except Exception as e: 
-                            if "403" in str(e): self.spotify_features_disabled = True; print("    ! Spotify API 403. Disabled.")
-                
+                            if "403" in str(e): 
+                                self.spotify_features_disabled = True
+                                print("    ! Spotify Audio Features API 403. Disabled.")
                 result = valid if valid or step.get('fallback') == 'none' else inp
                 print(f"  - Audio Filter: {len(result)} left.")
 
@@ -449,17 +428,11 @@ class SpotifyMixer:
                 for c in step.get('cases', []):
                     if m in c['months']:
                         print(f"      -> Season '{c['name']}' active.")
-                        for src in c['sources']:
-                            result.extend(self.get_tracks(src, hydrate='auto'))
+                        for src in c['sources']: result.extend(self.get_tracks(src))
                         break
-                
                 if result and step.get('sample'):
-                    req = step['sample']
-                    if len(result) > req:
-                        result = random.sample(result, req)
-                        print(f"  - Sampled {req} tracks.")
-                    else:
-                        print(f"  - Sample requested ({req}) > available ({len(result)}). Keeping all.")
+                    result = random.sample(result, min(len(result), step['sample']))
+                print(f"  - Season result: {len(result)} tracks.")
 
             elif action == 'weighted_shuffle':
                 inp = self.resolve_input(step['input']); fac = step.get('factor', 50)
@@ -474,42 +447,32 @@ class SpotifyMixer:
                     if any(a_ids & {a['id'] for a in p.get('artists', [])} for p in result[-dist:]): postponed.append(t)
                     else: result.append(t); pool = [postponed.pop(0)] + pool if postponed else pool
                 result.extend(postponed)
-                print(f"  - Separation done. Length: {len(result)}")
+                print(f"  - Artist separation done. Total: {len(result)}")
 
             elif action == 'sort':
                 result = sorted(self.resolve_input(step['input']), key=lambda t: t.get(step.get('by', 'popularity'), 0), reverse=step.get('reverse', True))
 
             elif action == 'save':
                 inp = self.resolve_input(step['input'])
-                
-                # --- AUTO CREATE PLAYLIST ---
                 target_id = step.get('id')
                 if step.get('create_new', False) or not target_id:
-                    name = step.get('name', f"Mixer Output {datetime.now().strftime('%Y-%m-%d')}")
-                    desc = step.get('description', "Created by Spotify Mixer")
+                    name, desc = step.get('name', f"Mixer Output {datetime.now().strftime('%Y-%m-%d')}"), step.get('description', "Created by Spotify Mixer")
                     user_id = self.sp_user.current_user()['id']
-                    
                     print(f"  - Creating NEW playlist '{name}'...")
                     new_pl = self.sp_user._post("me/playlists", payload={"name": name, "public": False, "description": desc})
                     target_id = new_pl['id']
-                    print(f"    > Created! ID: {target_id}")
-                # ----------------------------
-
                 if step.get('shuffle', False): random.shuffle(inp)
                 uris = [t['uri'] for t in inp]
                 try:
                     print(f"  - Saving to {target_id}...")
                     if uris:
-                        # Bypass Spotipy's deprecated /tracks endpoints for new API compliance
                         self.sp_user._put(f"playlists/{target_id}/items", payload={"uris": []})
                         time.sleep(0.5) 
                         for i in range(0, len(uris), 100): 
                             self.sp_user._post(f"playlists/{target_id}/items", payload={"uris": uris[i:i+100]})
                         print(f"  > SAVED: {len(uris)} tracks.")
-                    else: print("  ! Empty list.")
-                except Exception as e: 
-                    print(f"  ! SAVE ERROR: {e}")
-                    print(f"    (Make sure your App scopes are updated and user is whitelisted in Spotify Dashboard)")
+                    else: print("  ! Empty list, nothing to save.")
+                except Exception as e: print(f"  ! SAVE ERROR: {e}")
                 result = inp
 
             self.memory[output_name] = result
