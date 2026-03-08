@@ -8,10 +8,11 @@ Unlike simple "shufflers", this tool functions like a radio station programmer: 
 
 ## ⚠️ Important Disclaimers
 
-1. **Spotify Premium Required**: As of recent API changes (Feb 2026), an active **Spotify Premium subscription is mandatory** to use the Spotify Developer API. If your Premium subscription expires, the script will stop working and throw API errors.
-2. **App User Limits**: Spotify now restricts Developer Apps to a maximum of 5 registered users. This tool is intended for personal use, so this shouldn't be an issue, but you must explicitly whitelist your own account in the Spotify Developer Dashboard (see Setup).
-3. **Experimental Scraper**: This tool includes a fallback mechanism that scrapes the Spotify Embed HTML when the official API fails (e.g., for certain "Spotify Owned" playlists that return 404 via API). **This feature is experimental** and meant for educational purposes.
-4. **Spotify API 2026 Audio Features**: Spotify has heavily restricted access to "Audio Features" (BPM, Energy).
+1. **Spotipy Version Requirement**: Due to recent Spotify API changes (Feb/Mar 2026), you **must** use `spotipy` version **2.26.0 or higher**. Older versions of the library will fail to sync or read properly.
+2. **Spotify Premium Required**: An active **Spotify Premium subscription is mandatory** to use the Spotify Developer API. If your Premium subscription expires, the script will stop working and throw API errors.
+3. **App User Limits**: Spotify now restricts Developer Apps to a maximum of 5 registered users. This tool is intended for personal use, so this shouldn't be an issue, but you must explicitly whitelist your own account in the Spotify Developer Dashboard (see Setup).
+4. **Experimental Scraper**: This tool includes a fallback mechanism that scrapes the Spotify Embed HTML when the official API fails (e.g., for certain "Spotify Owned" playlists that return 404 via API). **This feature is experimental** and meant for educational purposes.
+5. **Spotify API 2026 Audio Features**: Spotify has heavily restricted access to "Audio Features" (BPM, Energy).
     * This script attempts to use **ReccoBeats** as a primary source for audio data.
     * It includes a fallback to the official API.
     * If both fail (Error 403), the script will automatically **skip** audio filters and continue generating the playlist without crashing.
@@ -22,15 +23,15 @@ Unlike simple "shufflers", this tool functions like a radio station programmer: 
 
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/JanHermanS/spotify-mixer.git](https://github.com/JanHermanS/spotify-mixer.git)
+   git clone https://github.com/JanHermanS/spotify-mixer.git
    cd spotify-mixer
    ```
 
 2. **Install requirements:**
    ```bash
-   pip install -r requirements.txt
+   pip install spotipy>=2.26.0 requests
    ```
-   *(Requires `spotipy` and `requests`)*
+   *(Requires at least `spotipy` 2.26.0 and `requests`)*
 
 ---
 

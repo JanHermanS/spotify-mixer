@@ -37,6 +37,7 @@ class SpotifyMixer:
         if not os.access(self.script_dir, os.W_OK):
             print(f"  ! WARNING: No write permissions in {self.script_dir}. Credentials might not be cached.")
 
+        # Included 'playlist-read-collaborative' to prevent 403 errors on owned collaborative playlists
         auth_manager = SpotifyOAuth(
             client_id=creds['client_id'],
             client_secret=creds['client_secret'],
@@ -157,12 +158,12 @@ class SpotifyMixer:
         return []
 
     def get_tracks(self, playlist_id, playlist_name=None, hydrate='auto'):
-        # 1. Check if ID is an existing local file
+        # 1. Check if ID is an existing local file (skip API/scraper if it is)
         file_path = playlist_id if os.path.isabs(playlist_id) else os.path.join(self.script_dir, playlist_id)
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return self.get_tracks_from_file(playlist_id, hydrate=hydrate)
 
-        # 2. Clean IDs and URLs
+        # 2. Clean IDs and URLs strictly
         raw_id = str(playlist_id).strip()
         if raw_id.startswith('spotify:playlist:'): raw_id = raw_id.split(':')[-1]
         elif "spotify.com" in raw_id: raw_id = raw_id.split("/")[-1].split("?")[0]
@@ -187,38 +188,34 @@ class SpotifyMixer:
                     else: break
                 return tracks
             
-            # --- API FETCH (Strict adherence to Official /items Documentation) ---
+            # --- API FETCH (Standard Official Spotipy Method) ---
             if len(raw_id) == 22:
-                print(f"    > Fetching items via API (playlists/{raw_id}/items)...")
+                print(f"    > Fetching items via API (ID: {raw_id})...")
+                results = None
                 try:
-                    # Direct bypass using the official /items endpoint
-                    url = f"playlists/{raw_id}/items"
-                    results = self.sp_user._get(url, market="from_token", limit=100)
-                    
+                    results = self.sp_user.playlist_items(raw_id, market="from_token")
+                except Exception as e1:
+                    print(f"    ! API fetch failed: {e1}")
+                    if "403" in str(e1):
+                        print("    ! 403 Forbidden: Missing scopes, user mismatch, or Premium required.")
+                
+                if results:
                     while results:
-                        items = results.get('items', [])
-                        print(f"      -> API returned page with {len(items)} items.")
-                        for item in items:
+                        for item in results.get('items', []):
                             if item and item.get('track') and item['track'].get('id'):
                                 tracks.append(item['track'])
-                        
-                        next_url = results.get('next')
-                        if next_url:
-                            print(f"      -> Fetching next page...")
-                            # Spotipy's _get handles full HTTPS URLs natively
-                            results = self.sp_user._get(next_url)
-                        else:
+                        if results.get('next'):
+                            try:
+                                results = self.sp_user.next(results)
+                            except Exception as e_next:
+                                print(f"    ! Pagination error: {e_next}")
+                                break
+                        else: 
                             break
-                    
                     if tracks: 
                         return tracks
                     else:
-                        print("    ! API connected successfully, but returned 0 tracks. Is the playlist empty?")
-                
-                except Exception as e:
-                    print(f"    ! API fetch failed: {e}")
-                    if "403" in str(e):
-                        print("    ! 403 Forbidden: Missing scopes, user mismatch, or Premium required.")
+                        print("    ! API connected successfully, but returned 0 tracks.")
 
             # --- FALLBACK: SCRAPER ---
             if len(raw_id) == 22:
@@ -231,6 +228,11 @@ class SpotifyMixer:
         if not os.path.isabs(db_filename): db_path = os.path.join(self.script_dir, db_filename)
         else: db_path = db_filename
         
+        # Clean ID for the clear_source action later
+        raw_id = str(playlist_id).strip()
+        if raw_id.startswith('spotify:playlist:'): raw_id = raw_id.split(':')[-1]
+        elif "spotify.com" in raw_id: raw_id = raw_id.split("/")[-1].split("?")[0]
+
         # Load current database
         current_db = {'tracks': []}
         if os.path.exists(db_path):
@@ -243,8 +245,8 @@ class SpotifyMixer:
         spotify_items = self.get_tracks(playlist_id, hydrate=True)
         
         if not spotify_items:
-            print("    > Source playlist on Spotify is currently empty. No new items to sync.")
-            return db_list # Return existing DB
+            print("    > Source playlist is currently empty or unreadable. No new items to sync.")
+            return db_list # Always return existing DB
 
         input_ids = set()
         for t in spotify_items:
@@ -276,9 +278,10 @@ class SpotifyMixer:
             current_db['tracks'] = db_list
             with open(db_path, 'w', encoding='utf-8') as f: json.dump(current_db, f, indent=2)
         
-        if clear_source and len(spotify_items) > 0:
+        if clear_source and len(spotify_items) > 0 and len(raw_id) == 22:
             try: 
-                self.sp_user._put(f"playlists/{playlist_id}/items", payload={"uris": []})
+                # Use official Spotipy method to clear playlist (replace with empty list)
+                self.sp_user.playlist_replace_items(raw_id, [])
                 print(f"    > Source playlist on Spotify has been cleared.")
             except Exception as e: print(f"    ! Could not clear playlist: {e}")
             
@@ -399,7 +402,9 @@ class SpotifyMixer:
                 for t in inp:
                     t_genres = set(g for a in t.get('artists', []) for g in a_map.get(a['id'], []))
                     match = any(tg for tg in t_genres for k in target if k in tg)
-                    if (step.get('mode', 'include', 'exclude') == 'include' and match) or (step.get('mode') == 'exclude' and not match): result.append(t)
+                    # FIX: Corrected typo in the mode fetching below
+                    filter_mode = step.get('mode', 'exclude')
+                    if (filter_mode == 'include' and match) or (filter_mode == 'exclude' and not match): result.append(t)
                 print(f"  - Genre Filter: {len(result)} left.")
 
             elif action == 'filter_audio':
@@ -454,25 +459,40 @@ class SpotifyMixer:
 
             elif action == 'save':
                 inp = self.resolve_input(step['input'])
-                target_id = step.get('id')
+                
+                # FIX: Clean the target ID before saving so Spotify doesn't reject it
+                raw_target = str(step.get('id', '')).strip()
+                if raw_target.startswith('spotify:playlist:'): raw_target = raw_target.split(':')[-1]
+                elif "spotify.com" in raw_target: raw_target = raw_target.split("/")[-1].split("?")[0]
+                target_id = raw_target
+
                 if step.get('create_new', False) or not target_id:
                     name, desc = step.get('name', f"Mixer Output {datetime.now().strftime('%Y-%m-%d')}"), step.get('description', "Created by Spotify Mixer")
                     user_id = self.sp_user.current_user()['id']
                     print(f"  - Creating NEW playlist '{name}'...")
-                    new_pl = self.sp_user._post("me/playlists", payload={"name": name, "public": False, "description": desc})
+                    # Official Spotipy method to create a playlist
+                    new_pl = self.sp_user.user_playlist_create(user=user_id, name=name, public=False, description=desc)
                     target_id = new_pl['id']
+                
                 if step.get('shuffle', False): random.shuffle(inp)
                 uris = [t['uri'] for t in inp]
+                
                 try:
                     print(f"  - Saving to {target_id}...")
                     if uris:
-                        self.sp_user._put(f"playlists/{target_id}/items", payload={"uris": []})
+                        # Official Spotipy methods: Replace completely empties the playlist and adds up to 100
+                        # Passing an empty array safely clears it.
+                        self.sp_user.playlist_replace_items(target_id, [])
                         time.sleep(0.5) 
+                        # Then chunk add the actual tracks
                         for i in range(0, len(uris), 100): 
-                            self.sp_user._post(f"playlists/{target_id}/items", payload={"uris": uris[i:i+100]})
+                            self.sp_user.playlist_add_items(target_id, uris[i:i+100])
                         print(f"  > SAVED: {len(uris)} tracks.")
-                    else: print("  ! Empty list, nothing to save.")
-                except Exception as e: print(f"  ! SAVE ERROR: {e}")
+                    else: 
+                        print("  ! Empty list, nothing to save.")
+                except Exception as e: 
+                    print(f"  ! SAVE ERROR: {e}")
+                
                 result = inp
 
             self.memory[output_name] = result
